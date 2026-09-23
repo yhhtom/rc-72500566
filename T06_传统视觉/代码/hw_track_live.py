@@ -100,6 +100,8 @@ BLUE_HI = (130,255,255)
 BLUE_LO = (100,100,50)
 GREEN_HI = (85,255,255)
 GREEN_LO = (35,100,50)
+YELLOW_HI = (35,255,255)
+YELLOW_LO = (26,100,50)
 # ---------------------------------------------------------------- 工具（已给）
 def _morph(mask, k=5):
     """开运算去噪 + 闭运算补洞"""
@@ -230,14 +232,19 @@ def detect_color(frame, color_name):
         mask = cv2.inRange(frame,BLUE_LO,BLUE_HI)
     elif color_name == "green":
         mask = cv2.inRange(frame,GREEN_LO,GREEN_HI)
+    elif color_name == "yellow":
+        mask = cv2.inRange(frame,YELLOW_LO,YELLOW_HI)
     mask = _morph(mask)
     cnts,_ = cv2.findContours(mask,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    maxs=0
+    maxcnt = None
     for cnt in cnts:
-        if(len(cnt)<100):
-            continue
-        p.append(_centroid(cnt))
-    sorted(p,key=lambda p: p[0])
-    return p
+        # if not _is_circle(cnt):
+        #     continue
+        if len(cnt[0])>maxs:
+            maxs = len(cnt[0])
+            maxcnt = cnt
+    return _centroid(maxcnt) if maxcnt is not None else None
     # ↑↑↑ 你的代码写在这里 ↑↑↑
 
 
@@ -260,23 +267,29 @@ def main():
     if not cap.isOpened():
         print("摄像头打开失败")
         exit()
-
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    frames = hits = 0
+    t0 = time.time()
     while True:
+        frames += 1
         ok, frame = cap.read()
         if not ok:
             print("读帧失败")
             break
-        for x,y in detect_color(frame,"red"):
+        result = detect_color(frame,"red")
+        if result is not None:
+            hits += 1
+            x,y=result
             cv2.drawMarker(frame,(int(x),int(y)),(0,255,0),cv2.MARKER_CROSS)
         cv2.imshow("camera", frame)
-
+        if(frames==60):
+            print("命中率 %.0f%%   FPS %.1f" % (hits / frames * 100, frames / (time.time() - t0)))
         if cv2.waitKey(1) & 0xFF == ord('q'):   # 按 q 退出
             break
 
     cap.release()
     cv2.destroyAllWindows()
     # ↑↑↑ 你的代码写在这里 ↑↑↑
-
 
 if __name__ == "__main__":
     main()

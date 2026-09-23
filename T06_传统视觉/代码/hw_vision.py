@@ -160,6 +160,7 @@ def detect_red_circle(img) -> Optional[Tuple[float, float]]:
     # ↑↑↑ 你的代码写在这里 ↑↑↑
 img = cv2.imread(IN+"quiz_01.png")
 x,y = detect_red_circle(img)
+print(x,y)
 out = cv2.drawMarker(img,(int(x),int(y)),(0,255,0),cv2.MARKER_CROSS)
 cv2.imshow("Quiz01", out)
 cv2.waitKey(0)
