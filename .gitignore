@@ -1,0 +1,28 @@
+# 运行产物（不要提交）
+__pycache__/
+*.pyc
+mcu_log.json
+out/
+*.log
+
+# 素材与权重（视频走网盘/群文件，不进 git；yolov8n.pt 已随包提供）
+assets/*.pt
+!assets/yolov8n.pt
+assets/*.mp4
+assets/*.avi
+assets/videos/
+!assets/README.md
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+
+# 训练与数据集产物
+runs/
+dataset/
+*.engine
+*.onnx
+logs/
+.ipynb_checkpoints/
+*.bak
