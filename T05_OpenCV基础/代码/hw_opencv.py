@@ -54,7 +54,7 @@ def resize_keep(img: "np.ndarray", max_side: int = 640):
     """
     # ↓↓↓ 在这里写你的代码 ↓↓↓
     # raise NotImplementedError("TODO: 算比例 -> cv2.resize")
-    a,b,c=img.shape
+    a,b=img.shape[:2]
     if(a>b):
         r = max_side/a
     else:
@@ -73,7 +73,7 @@ def draw_marker(img: "np.ndarray", cx: float, cy: float,
     # ↓↓↓ 在这里写你的代码 ↓↓↓
     # raise NotImplementedError("TODO: copy -> cv2.circle / drawMarker / putText")
     img2 = img.copy()
-    cv2.circle(img2,(cx,cy),5,(0,0,255))
+    cv2.circle(img2,(cx,cy),5,(0,0,255),-1)
     cv2.drawMarker(img2, (cx,cy),(0,0,255),cv2.MARKER_CROSS)
     if text is not None:
         cv2.putText(img2,text,(cx+10,cy),cv2.FONT_HERSHEY_COMPLEX,0.5,(0,0,255))
