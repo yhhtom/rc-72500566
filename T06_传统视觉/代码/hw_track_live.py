@@ -70,14 +70,14 @@ T07 进阶 · 完整实时追踪程序（全部自己写）
 import os
 import sys
 import time
-
+from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
-from vision_util import setup, imread, FPSMeter, draw_point, put_hud   # noqa: E402
+# from vision_util import setup, imread, FPSMeter, draw_point, put_hud   # noqa: E402
 
-setup()
+# setup()
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -92,7 +92,121 @@ DROIDCAM_URL = "http://%s:4747/video" % DROIDCAM_IP
 # 没有摄像头时用哪张图/视频练手
 FALLBACK_IMAGE = os.path.join(HERE, "images", "patterns.png")
 
+RED_HI1 = (180,255,255)
+RED_LO1 = (170,100,50)
+RED_HI2 = (10,255,255)
+RED_LO2 = (0,100,50)
+BLUE_HI = (130,255,255)
+BLUE_LO = (100,100,50)
+GREEN_HI = (85,255,255)
+GREEN_LO = (35,100,50)
+# ---------------------------------------------------------------- 工具（已给）
+def _morph(mask, k=5):
+    """开运算去噪 + 闭运算补洞"""
+    kernel = np.ones((k, k), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    return mask
 
+
+def _centroid(cnt) -> Optional[Tuple[float, float]]:
+    """算轮廓质心，退化轮廓返回 None"""
+    M = cv2.moments(cnt)
+    if M["m00"] == 0:
+        return None
+    return (M["m10"] / M["m00"], M["m01"] / M["m00"])
+
+
+def _vertices(cnt) -> int:
+    """多边形逼近后的顶点数（3=三角 4=四边 >=8≈圆）"""
+    peri = cv2.arcLength(cnt, True)
+    approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+    return len(approx)
+
+
+def _in_range(img, lo, hi):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    return cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
+
+# ---------------------------------------------------------------- 通用小工具
+def _pts(cnt):
+    """轮廓 -> (N, 2) float 点集"""
+    return cnt.reshape(-1, 2).astype(np.float32)
+
+
+def _angle(p0, p1, p2):
+    """返回 p1 处的夹角（度），p0-p1-p2"""
+    v1, v2 = p0 - p1, p2 - p1
+    n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+    if n1 == 0 or n2 == 0:
+        return 0.0
+    c = np.dot(v1, v2) / (n1 * n2)
+    return float(np.degrees(np.arccos(np.clip(c, -1, 1))))
+
+
+def _approx(cnt, eps_ratio=0.02):
+    """多边形逼近，返回 (K, 2) 点集"""
+    peri = cv2.arcLength(cnt, True)
+    approx = cv2.approxPolyDP(cnt, eps_ratio * peri, True)
+    return _pts(approx)
+
+
+def _is_circle(cnt, min_area=100, circularity_th=0.7) -> bool:
+    """判断轮廓是否接近圆形。
+
+    判据：圆形度 = 4πA / P²，完美圆 = 1。
+    """
+    area = cv2.contourArea(cnt)
+    if area < min_area:
+        return False
+
+    peri = cv2.arcLength(cnt, True)
+    if peri == 0:
+        return False
+
+    circularity = 4 * np.pi * area / (peri * peri)
+    return circularity > circularity_th
+
+
+def _is_rectangle(cnt, min_area=100, angle_tol=15, eps_ratio=0.02) -> bool:
+    """判断轮廓是否接近矩形（含正方形）。
+
+    判据：逼近后 4 个顶点、凸、四个角都接近 90°。
+    """
+    if cv2.contourArea(cnt) < min_area:
+        return False
+
+    pts = _approx(cnt, eps_ratio)
+    if len(pts) != 4:
+        return False
+    if not cv2.isContourConvex(pts.reshape(-1, 1, 2)):
+        return False
+
+    # 四个内角都要接近 90°
+    for i in range(4):
+        a = _angle(pts[i - 1], pts[i], pts[(i + 1) % 4])
+        if abs(a - 90) > angle_tol:
+            return False
+    return True
+
+
+def _is_square(cnt, min_area=100, side_tol=0.1,
+               angle_tol=15, eps_ratio=0.02) -> bool:
+    """判断轮廓是否接近正方形。
+
+    在矩形基础上，额外要求四边等长（最长/最短 < 1+side_tol）。
+    """
+    if not _is_rectangle(cnt, min_area, angle_tol, eps_ratio):
+        return False
+
+    pts = _approx(cnt, eps_ratio)
+    sides = [np.linalg.norm(pts[i] - pts[(i + 1) % 4]) for i in range(4)]
+    if min(sides) == 0:
+        return False
+
+    return (max(sides) / min(sides)) < (1 + side_tol)
+
+# ---------------------------------------------------------------- 1
 # ---------------------------------------------------------------- 必须实现
 def detect_color(frame, color_name):
     """在 BGR 帧里找出 color_name 对应颜色目标的质心。
@@ -104,7 +218,26 @@ def detect_color(frame, color_name):
     提示：转 HSV → inRange（红色两段合并）→ 形态学开+闭 → 最大轮廓 → moments
     """
     # ↓↓↓ 在这里写你的代码 ↓↓↓
-    raise NotImplementedError("TODO: 颜色阈值 -> 形态学 -> 最大轮廓 -> 质心")
+    # raise NotImplementedError("TODO: 颜色阈值 -> 形态学 -> 最大轮廓 -> 质心")
+    p = []
+    frame = cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
+    mask = None
+    if color_name == "red":
+        mask1 = cv2.inRange(frame,RED_LO1,RED_HI1)
+        mask2 = cv2.inRange(frame,RED_LO2,RED_HI2)
+        mask = cv2.bitwise_or(mask1,mask2)
+    elif color_name == "blue":
+        mask = cv2.inRange(frame,BLUE_LO,BLUE_HI)
+    elif color_name == "green":
+        mask = cv2.inRange(frame,GREEN_LO,GREEN_HI)
+    mask = _morph(mask)
+    cnts,_ = cv2.findContours(mask,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for cnt in cnts:
+        if(len(cnt)<100):
+            continue
+        p.append(_centroid(cnt))
+    sorted(p,key=lambda p: p[0])
+    return p
     # ↑↑↑ 你的代码写在这里 ↑↑↑
 
 
@@ -114,14 +247,34 @@ def open_source(src):
     src 可能是 0（摄像头）、"http://..."（网络流）或一个视频文件路径。
     """
     # ↓↓↓ 在这里写你的代码 ↓↓↓
-    raise NotImplementedError("TODO: VideoCapture + set(CAP_PROP_BUFFERSIZE, 1)")
+    # raise NotImplementedError("TODO: VideoCapture + set(CAP_PROP_BUFFERSIZE, 1)")
     # ↑↑↑ 你的代码写在这里 ↑↑↑
 
 
 def main():
     """主循环：读帧 → 检测当前颜色 → 画 HUD → 按键切换/退出。"""
     # ↓↓↓ 在这里写你的代码 ↓↓↓
-    raise NotImplementedError("TODO: 自己写完整程序（含按键切换与断流重连）")
+    # raise NotImplementedError("TODO: 自己写完整程序（含按键切换与断流重连）")
+    cap = cv2.VideoCapture(0)          # 0 = 默认摄像头
+
+    if not cap.isOpened():
+        print("摄像头打开失败")
+        exit()
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            print("读帧失败")
+            break
+        for x,y in detect_color(frame,"red"):
+            cv2.drawMarker(frame,(int(x),int(y)),(0,255,0),cv2.MARKER_CROSS)
+        cv2.imshow("camera", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):   # 按 q 退出
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
     # ↑↑↑ 你的代码写在这里 ↑↑↑
 
 
